@@ -10,8 +10,7 @@ import numpy as np
 import multiprocessing as mp 
 import pandas as pd 
 
-
-def Dioecious(rw,rm,lw,lm,N0=10**4,mu=10**(-4),sgv=0,sr=0.5, timeseries=False) :
+def Unisexual(rw,rm,lw,lm,N0=10**4,mu=10**(-4),sgv=0,sr=0.5, timeseries=False) :
     """
     Simulates the eco-evolutionary dynamics of a population of unisexuals (dioecious) until either the population goes
     extinct or reaches twice the starting population size N0.
@@ -42,8 +41,10 @@ def Dioecious(rw,rm,lw,lm,N0=10**4,mu=10**(-4),sgv=0,sr=0.5, timeseries=False) :
     """
     
     np.random.seed()
+    #mu = 0.0001
     Xm = round(sgv*N0)
     Xw = N0 - Xm 
+    #NoG = 1000
     T = 0 #Time to first Mutation
     DidMutationOccur = False
     lamda_w = lw
@@ -84,23 +85,23 @@ def Dioecious(rw,rm,lw,lm,N0=10**4,mu=10**(-4),sgv=0,sr=0.5, timeseries=False) :
         
         if timeseries: 
             Xseries = Xseries + [ [Xw_F + Xw_M, Xm_F + Xm_M] ]
-    return Ext
+    return [Ext,Xseries,T]
 
 
 NoR_rng = [10**(5),10**5]
 rw_rng = [0.0001,0.001]
 
-lw_crit = [4.92, 2.01]
+lw_crit = [4.91, 2.01]
 
 lw_base = 0.99*np.array(lw_crit)
-#percentage_rng = [10,50,100,500,1000,5000,10000]
-percentage_rng = [200,300,400]
-fecundity_prop_rng = np.arange(0,1.01,0.05)
+percentage_rng = [10,50,100,500,1000,5000,10000]
+fecundity_prop_rng = np.arange(-0.5,1.51,0.05)
 
-output_writer = pd.ExcelWriter('RescueProb_FindingvsFecundity_Supl.xlsx')
+output_writer = pd.ExcelWriter('RescueProb_FindingvsFecundity.xlsx')
 
 a = mp.cpu_count() - 2
 print(a)
+typ = 1
 
 for r_ind, rw in enumerate(rw_rng) :
     NoR = NoR_rng[r_ind]
@@ -109,18 +110,30 @@ for r_ind, rw in enumerate(rw_rng) :
     for percent in percentage_rng : 
         ExtProb_row = []
         for lw_x in fecundity_prop_rng : 
+            lw_x = round(lw_x,2) 
             lm = (lw_x*percent)*0.01*lw+lw
-            rm = ((1-lw_x)*percent)*0.01*rw+rw
+            if typ == 1 :
+                rm = (1-lw_x)*percent*0.01*rw+rw
+            elif typ == 2 : 
+                Nchoice = 1
+                sr = (1-lw_x)*percent*0.01
+                pnew = min( max( (1-np.exp(-rw*Nchoice))*(1+sr), 0 ), 1)
+                rm = np.inf if pnew == 1 else -1/Nchoice * np.log( 1 - pnew ) 
+            
+            if lm <= 0 or rm <= 0 : 
+                ExtProb_row = ExtProb_row + [1]
+                print(rw,percent,lw_x,1, flush=True)
+                continue 
             pool = mp.Pool(a)
-            results = pool.starmap(Dioecious, [(rw,rm,lw,lm,10**4,10**(-4),0) for rep in range(NoR)])
+            results = pool.starmap(Unisexual, [(rw,rm,lw,lm,10**4,10**(-4),0) for rep in range(NoR)])
             pool.close()
             pool.join()
-            Ext = np.mean(results)
+            Ext = np.mean([results[i][0] for i in range(len(results)) ])
             ExtProb_row = ExtProb_row + [Ext]
-            print(rw,percent,lw_x,Ext)
+            print(rw,percent,lw_x,Ext, flush=True)
         ExtProb = ExtProb + [ ExtProb_row ]
         
     DF = pd.DataFrame(ExtProb,columns = fecundity_prop_rng,index = percentage_rng)
     DF.to_excel(output_writer,sheet_name = str(rw)) 
     
-output_writer.save()
+output_writer._save()
